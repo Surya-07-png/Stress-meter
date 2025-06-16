@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>STRESS METER</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      text-align: center;
+      padding: 20px;
+      background: linear-gradient(to right, #e0f7fa, #e1bee7);
+      min-height: 100vh;
+    }
+
+    h1 {
+      color: #2c3e50;
+      margin-top: 20px;
+    }
+
+    #result, #history {
+      font-size: 1.2em;
+      margin-top: 20px;
+      color: white;
+      padding: 15px;
+      border-radius: 10px;
+      max-width: 90%;
+      margin-left: auto;
+      margin-right: auto;
+      display: none;
+      transition: all 0.5s ease;
+      white-space: pre-line;
+    }
+
+    .stress-high { background-color: #e74c3c; }
+    .stress-moderate { background-color: #f39c12; }
+    .stress-low { background-color: #2ecc71; }
+
+    button {
+      padding: 12px 25px;
+      font-size: 17px;
+      margin: 10px;
+      background-color: #3498db;
+      color: white;
+      border: none;
+      border-radius: 30px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+
+    button:hover:not(:disabled) {
+      background-color: #2980b9;
+    }
+
+    button:disabled {
+      background-color: #95a5a6;
+      cursor: not-allowed;
+    }
+
+    #countdownCircle {
+      width: 120px;
+      height: 120px;
+      border: 6px solid #3498db;
+      border-radius: 50%;
+      margin: 20px auto 0;
+      font-size: 30px;
+      line-height: 120px;
+      font-weight: bold;
+      color: #3498db;
+      display: none;
+    }
+
+    #loader {
+      margin-top: 20px;
+      display: none;
+    }
+
+    #loader:after {
+      content: " ";
+      display: block;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      border: 5px solid #3498db;
+      border-color: #3498db transparent #3498db transparent;
+      animation: loader-spin 1.2s linear infinite;
+      margin: auto;
+    }
+
+    @keyframes loader-spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    #graphContainer {
+      width: 100%;
+      max-width: 600px;
+      margin: 30px auto;
+    }
+
+    video, canvas#canvas {
+      display: none;
+    }
+
+    #history ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+      text-align: left;
+    }
+
+    #history li {
+      background-color: rgba(255, 255, 255, 0.1);
+      padding: 10px;
+      margin: 5px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.3);
+    }
+  </style>
+</head>
+<body>
+  <h1>STRESS METER</h1>
+  <p>Place your finger gently on the rear camera and click Start.</p>
+
+  <button id="startBtn" onclick="startStressTest()">Start Test</button>
+  <button onclick="toggleHistory()">View History</button>
+
+  <div id="countdownCircle">10</div>
+  <div id="loader"></div>
+  <div id="result"></div>
+  <div id="history"></div>
+
+  <div id="graphContainer">
+    <canvas id="graph"></canvas>
+  </div>
+
+  <video id="video" autoplay></video>
+  <canvas id="canvas" width="100" height="100"></canvas>
+
+  <script>
+    let chart;
+
+    function initChart() {
+      const ctx = document.getElementById('graph').getContext('2d');
+      chart = new Chart(ctx, {
+        type: 'line',
+        data: {
+          labels: [],
+          datasets: [{
+            label: 'Brightness Over Time',
+            data: [],
+            borderColor: '#3498db',
+            fill: false,
+            tension: 0.1
+          }]
+        },
+        options: {
+          animation: false,
+          responsive: true,
+          scales: {
+            x: { title: { display: true, text: 'Time (samples)' }},
+            y: { title: { display: true, text: 'Brightness' }}
+          }
+        }
+      });
+    }
+
+    async function startStressTest() {
+      const result = document.getElementById("result");
+      const video = document.getElementById("video");
+      const canvas = document.getElementById("canvas");
+      const ctx = canvas.getContext("2d");
+      const loader = document.getElementById("loader");
+      const startBtn = document.getElementById("startBtn");
+      const countdownCircle = document.getElementById("countdownCircle");
+
+      startBtn.disabled = true;
+      result.style.display = "none";
+      result.className = "";
+      countdownCircle.style.display = "block";
+      loader.style.display = "block";
+      document.getElementById("history").style.display = "none";
+
+      if (!chart) initChart();
+      chart.data.labels = [];
+      chart.data.datasets[0].data = [];
+      chart.update();
+
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } });
+        video.srcObject = stream;
+
+        const brightnessData = [];
+        const duration = 10000;
+        const sampleRate = 50;
+        let sampleCount = 0;
+        let countdown = 10;
+        countdownCircle.innerText = countdown;
+
+        const countdownTimer = setInterval(() => {
+          countdown--;
+          countdownCircle.innerText = countdown;
+        }, 1000);
+
+        const interval = setInterval(() => {
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const avgBrightness = getAverageBrightness(frame.data);
+          brightnessData.push(avgBrightness);
+
+          chart.data.labels.push(sampleCount++);
+          chart.data.datasets[0].data.push(avgBrightness);
+          chart.update();
+        }, sampleRate);
+
+        setTimeout(() => {
+          clearInterval(interval);
+          clearInterval(countdownTimer);
+          video.srcObject.getTracks().forEach(track => track.stop());
+
+          const smoothed = smoothData(brightnessData);
+          const peaks = countPeaks(smoothed);
+          const bpm = Math.round((peaks * (60000 / duration)));
+
+          let stressLevel = "Low";
+          let advice = "💡 Tip: Stay active and hydrated.";
+          result.className = "stress-low";
+          if (bpm >= 90) {
+            stressLevel = "High";
+            result.className = "stress-high";
+            advice = "💡 Tip: Try deep breathing or take a short break.";
+          } else if (bpm >= 70) {
+            stressLevel = "Moderate";
+            result.className = "stress-moderate";
+            advice = "💡 Tip: You're doing fine, maintain balance.";
+          }
+
+          result.innerText = `❤️ Heart Rate: ${bpm} BPM\n🧠 Stress Level: ${stressLevel}\n\n${advice}`;
+          result.style.display = "block";
+          loader.style.display = "none";
+          countdownCircle.style.display = "none";
+          startBtn.disabled = false;
+
+          saveResult(bpm, stressLevel);
+          window.scrollTo({ top: result.offsetTop - 50, behavior: 'smooth' });
+
+          if ("vibrate" in navigator) navigator.vibrate(500);
+        }, duration);
+
+      } catch (err) {
+        result.innerText = "Camera access failed: " + err.message;
+        result.style.display = "block";
+        loader.style.display = "none";
+        countdownCircle.style.display = "none";
+        startBtn.disabled = false;
+      }
+    }
+
+    function getAverageBrightness(data) {
+      let total = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        total += data[i];
+      }
+      return total / (data.length / 4);
+    }
+
+    function smoothData(data) {
+      const smoothed = [];
+      for (let i = 1; i < data.length - 1; i++) {
+        smoothed.push((data[i - 1] + data[i] + data[i + 1]) / 3);
+      }
+      return smoothed;
+    }
+
+    function countPeaks(data) {
+      let peaks = 0;
+      const threshold = (Math.max(...data) - Math.min(...data)) * 0.4 + Math.min(...data);
+      for (let i = 1; i < data.length - 1; i++) {
+        if (data[i] > data[i - 1] && data[i] > data[i + 1] && data[i] > threshold) {
+          peaks++;
+        }
+      }
+      return peaks;
+    }
+
+    function saveResult(bpm, level) {
+      const records = JSON.parse(localStorage.getItem("stressRecords") || "[]");
+      records.push({ bpm, level, time: new Date().toLocaleString() });
+      localStorage.setItem("stressRecords", JSON.stringify(records));
+    }
+
+    function toggleHistory() {
+      const historyBox = document.getElementById("history");
+      if (historyBox.style.display === "block") {
+        historyBox.style.display = "none";
+      } else {
+        const records = JSON.parse(localStorage.getItem("stressRecords") || "[]").reverse();
+        if (records.length === 0) {
+          historyBox.innerHTML = "<p>No history found.</p>";
+        } else {
+          historyBox.innerHTML = "<ul>" + records.map(r =>
+            `<li><strong>${r.time}</strong><br>❤️ ${r.bpm} BPM, 🧠 ${r.level}</li>`).join("") + "</ul>";
+        }
+        historyBox.style.display = "block";
+      }
+    }
+  </script>
+</body>
+</html>
